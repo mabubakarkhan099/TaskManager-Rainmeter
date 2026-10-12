@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>To-do List</title>
+
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+
+  <body>
+    <!--
+      Icon sprite. Kept inline (no external SVG files, no fetch, no CDN) so the
+      widget stays fully offline and never blocks on a network round-trip.
+    -->
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <symbol id="icon-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7"></circle>
+        <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 1 0-2.3 6.3"></path>
+        <polyline points="20 4 20 11 13 11"></polyline>
+      </symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24">
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+      </symbol>
+      <symbol id="icon-pen" viewBox="0 0 24 24">
+        <path d="M4 20h4l10.5-10.5a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5V20z"></path>
+        <line x1="13.5" y1="6.5" x2="17.5" y2="10.5"></line>
+      </symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+        <path d="M15 5.5A2.5 2.5 0 0 0 12.5 4H6.5A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 5.5 15"></path>
+      </symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24">
+        <path d="M4 7h16"></path>
+        <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"></path>
+        <path d="M6.5 7l.8 11.1A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.9L17.5 7"></path>
+      </symbol>
+    </svg>
+
+    <main class="widget" id="widget">
+      <div class="widget-body" id="widgetBody">
+        <!-- ===================== MASTHEAD ===================== -->
+        <header class="app-header">
+          <div class="header-top">
+            <h1 class="masthead">
+              <span class="visually-hidden">To-do list for </span>
+              <span id="mastheadDate"></span>
+            </h1>
+
+            <div class="header-actions">
+              <button
+                type="button"
+                class="icon-btn"
+                id="searchToggle"
+                aria-label="Search tasks"
+                aria-expanded="false"
+                aria-controls="searchRow"
+                title="Search tasks (Ctrl+F)"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+              </button>
+
+              <button
+                type="button"
+                class="icon-btn"
+                id="reloadBtn"
+                aria-label="Reload tasks from storage"
+                title="Reload tasks from storage (double-click to restart the widget)"
+              >
+                <svg class="icon" aria-hidden="true"><use href="#icon-refresh"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <p class="status-line" id="statusLine"></p>
+        </header>
+
+        <!-- Printed-agenda double rule: separates the masthead from the board. -->
+        <div class="masthead-rule" aria-hidden="true"></div>
+
+        <!-- ====================== FILTER TABS ====================== -->
+        <div class="filters" id="filters" role="group" aria-label="Filter tasks">
+          <button type="button" class="filter-btn is-active" data-filter="all" aria-pressed="true">
+            <span>All</span><span class="filter-count" data-count-for="all">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="active" aria-pressed="false">
+            <span>Open</span><span class="filter-count" data-count-for="active">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="completed" aria-pressed="false">
+            <span>Done</span><span class="filter-count" data-count-for="completed">0</span>
+          </button>
+          <button type="button" class="filter-btn" data-filter="overdue" aria-pressed="false">
+            <span>Late</span><span class="filter-count" data-count-for="overdue">0</span>
+          </button>
+        </div>
+
+        <!-- ======================== SEARCH ======================== -->
+        <div class="search-row" id="searchRow" hidden>
+          <label class="visually-hidden" for="searchInput">Search tasks</label>
+          <input
+            class="search-input"
+            id="searchInput"
+            type="search"
+            placeholder="Search tasks…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            type="button"
+            class="icon-btn small"
+            id="searchClear"
+            aria-label="Clear search"
+            title="Clear search"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#icon-close"></use></svg>
+          </button>
+        </div>
+
+        <!-- ======================== THE BOARD ======================== -->
+        <section class="task-area" id="taskArea" aria-label="Tasks">
+          <!-- The rail is the widget's spine: every task hangs off it. -->
+          <span class="rail" aria-hidden="true"></span>
+
+          <div class="task-scroll">
+            <div class="bucket-list" id="taskList"></div>
+            <p class="empty-state" id="emptyState" hidden></p>
+          </div>
+        </section>
+
+        <!-- ========================= FOOTER ========================= -->
+        <footer class="app-footer">
+          <button type="button" class="add-bar" id="addTaskBtn">
+            <svg class="icon" aria-hidden="true"><use href="#icon-plus"></use></svg>
+            <span>Add task</span>
+          </button>
+        </footer>
+      </div>
+
+      <!-- ====================== TASK EDITOR ====================== -->
+      <div class="overlay is-sheet" id="taskOverlay" hidden>
+        <form class="sheet" id="taskForm" novalidate aria-labelledby="taskFormTitle">
+          <div class="sheet-header">
+            <h2 class="sheet-title" id="taskFormTitle">Add task</h2>
+
+            <button type="button" class="icon-btn" id="formClose" aria-label="Close editor">
+              <svg class="icon" aria-hidden="true"><use href="#icon-close"></use></svg>
+            </button>
+          </div>
+
+          <div class="sheet-body">
+            <div class="field">
+              <label class="field-label" for="taskTitleInput">Title</label>
+              <input
+                class="text-input"
+                id="taskTitleInput"
+                name="title"
+                type="text"
+                maxlength="200"
+                placeholder="What needs to be done?"
+                autocomplete="off"
+              />
+              <p class="field-error" id="titleError" role="alert" hidden></p>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="taskDateInput">Due date</label>
+                <input class="text-input" id="taskDateInput" name="dueDate" type="date" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="taskTimeInput">Time</label>
+                <input class="text-input" id="taskTimeInput" name="dueTime" type="time" />
+              </div>
+            </div>
+
+            <div class="field-row field-row-tight">
+              <p class="field-hint" id="scheduleHint">Optional — tasks without one sit under No date.</p>
+              <button type="button" class="link-btn" id="clearSchedule">Clear</button>
+            </div>
+
+            <fieldset class="field segmented-field">
+              <legend class="field-label">Priority</legend>
+              <div class="segmented" id="priorityGroup">
+                <input type="radio" name="priority" id="priorityLow" value="low" />
+                <label for="priorityLow">Low</label>
+                <input type="radio" name="priority" id="priorityNormal" value="normal" checked />
+                <label for="priorityNormal">Normal</label>
+                <input type="radio" name="priority" id="priorityHigh" value="high" />
+                <label for="priorityHigh">High</label>
+              </div>
+            </fieldset>
+
+            <div class="field">
+              <label class="field-label" for="taskDescriptionInput">Description</label>
+              <textarea
+                class="text-input"
+                id="taskDescriptionInput"
+                name="description"
+                maxlength="1000"
+                placeholder="Add some details…"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="sheet-actions">
+            <button type="button" class="btn btn-ghost" id="formCancel">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="formSubmit">Save task</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ===================== DELETE CONFIRMATION ===================== -->
+      <div class="overlay is-center" id="confirmOverlay" hidden>
+        <div
+          class="sheet sheet-small"
+          role="alertdialog"
+          aria-labelledby="confirmTitle"
+          aria-describedby="confirmMessage"
+        >
+          <div class="sheet-header">
+            <h2 class="sheet-title" id="confirmTitle">Delete this task?</h2>
+          </div>
+
+          <div class="sheet-body">
+            <p class="sheet-text" id="confirmMessage"></p>
+          </div>
+
+          <div class="sheet-actions">
+            <button type="button" class="btn btn-ghost" id="confirmCancel">Cancel</button>
+            <button type="button" class="btn btn-danger" id="confirmDelete">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- =========================== TOASTS =========================== -->
+      <div class="toast-region" id="toastRegion" role="status" aria-live="polite"></div>
+    </main>
+
+    <!--
+      One task row is rendered from this template on every list refresh, so no
+      markup is ever built from a string (user text is always set via
+      textContent).
+    -->
+    <template id="taskTemplate">
+      <li class="task-item">
+        <label class="task-check">
+          <input type="checkbox" class="task-toggle" />
+          <span class="checkmark" aria-hidden="true"></span>
+        </label>
+
+        <div class="task-content">
+          <div class="task-heading">
+            <h3 class="task-title"></h3>
+            <span class="task-flag" hidden></span>
+          </div>
+
+          <p class="task-when" hidden></p>
+          <p class="task-desc" hidden></p>
+        </div>
+
+        <div class="task-actions">
+          <button type="button" class="icon-btn tiny act-edit">
+            <svg class="icon" aria-hidden="true"><use href="#icon-pen"></use></svg>
+          </button>
+          <button type="button" class="icon-btn tiny act-duplicate">
+            <svg class="icon" aria-hidden="true"><use href="#icon-copy"></use></svg>
+          </button>
+          <button type="button" class="icon-btn tiny act-delete">
+            <svg class="icon" aria-hidden="true"><use href="#icon-trash"></use></svg>
+          </button>
+        </div>
+      </li>
+    </template>
+
+    <!-- One day bucket: a heading pinned to the rail, then its rows. -->
+    <template id="bucketTemplate">
+      <section class="bucket">
+        <h2 class="bucket-heading">
+          <span class="bucket-label"></span>
+          <span class="bucket-count"></span>
+        </h2>
+
+        <ul class="task-list"></ul>
+      </section>
+    </template>
+
+    <script src="./js/dates.js"></script>
+    <script src="./js/storage.js"></script>
+    <script src="./js/store.js"></script>
+    <script src="./js/app.js"></script>
+  </body>
+</html>

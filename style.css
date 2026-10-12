@@ -1,0 +1,1565 @@
+@charset "UTF-8";
+
+/* =========================================================================
+   TO-DO WIDGET — "DEPARTURE BOARD"
+   -------------------------------------------------------------------------
+   The widget is a desktop board for one day. Its spine is a single hairline
+   rail that every task hangs off, grouped by when it is due; entries are
+   separated by rules rather than boxed into cards, and type does the work
+   that borders would otherwise do. Colour is spent on one meaning only:
+   something is late.
+
+   Surfaces : warm slate (the Rainmeter panel paints the board itself).
+   Type     : Bahnschrift for structure, Segoe UI for reading.
+   ========================================================================= */
+
+:root {
+  /* --------------------------- Surfaces ---------------------------- */
+  /* --ink matches the panel colour in todoList.ini; it masks the rail
+     behind each task node so the line reads as passing behind it. */
+  --ink: #1b1917;
+  --ink-hover: #242120;
+  --ink-raised: #201e1c;
+  --wash: rgba(233, 228, 217, 0.045);
+  --wash-strong: rgba(233, 228, 217, 0.09);
+
+  /* ----------------------------- Ink ------------------------------- */
+  --bone: #e9e4d9;
+  --dim: #a6a29a;
+  --faint: #7c7870;
+
+  /* ------------------- One colour, one meaning --------------------- */
+  --alarm: #e2574c;
+  --alarm-wash: rgba(226, 87, 76, 0.13);
+
+  /* ---------------------------- Lines ------------------------------ */
+  /* --line and --line-strong only ever draw structure (rules, ticks,
+     panel edges). Anything a person can act on is drawn with --edge, which
+     is dark enough to clear the 3:1 boundary contrast floor on its own. */
+  --line: rgba(233, 228, 217, 0.13);
+  --line-strong: rgba(233, 228, 217, 0.24);
+  --edge: rgba(233, 228, 217, 0.42);
+
+  /* --------------------------- Overlays ---------------------------- */
+  --scrim: rgba(11, 10, 9, 0.74);
+
+  /* -------------------------- Typography --------------------------- */
+  --font-display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI",
+    "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  --font-text: "Segoe UI Variable Text", "Segoe UI", Tahoma, "Trebuchet MS",
+    sans-serif;
+
+  --f-xl: 17px;
+  --f-lg: 12.5px;
+  --f-base: 12px;
+  --f-sm: 11px;
+  --f-xs: 10px;
+
+  /* --------------------------- Geometry ---------------------------- */
+  --pad: 12px;
+  --rail: 14px; /* rail offset inside the board */
+  --gutter: 32px; /* where task text starts, right of the rail */
+  --row-pad: 8px;
+  /* Width of the board's scroll rail. The list reserves it permanently so
+     the column never jumps, and the tabs, search field and add bar stop at
+     the same edge so the whole column lines up. */
+  --scroll-rail: 5px;
+
+  /* ---------------------------- Motion ----------------------------- */
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --dur-fast: 110ms;
+  --dur: 170ms;
+}
+
+/* =========================================================================
+   BASE
+   ========================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+
+  overflow: hidden;
+
+  /* The skin draws the panel; the page stays transparent. */
+  background: transparent;
+
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-text);
+  font-size: var(--f-base);
+  font-weight: 400;
+
+  color: var(--bone);
+
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: 0;
+}
+
+ul {
+  list-style: none;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 400;
+}
+
+:focus-visible {
+  outline: 2px solid var(--bone);
+  outline-offset: 2px;
+}
+
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+
+.visually-hidden {
+  position: absolute;
+
+  width: 1px;
+  height: 1px;
+
+  margin: -1px;
+  padding: 0;
+
+  overflow: hidden;
+
+  clip-path: inset(50%);
+
+  white-space: nowrap;
+}
+
+.icon-sprite {
+  position: absolute;
+
+  width: 0;
+  height: 0;
+
+  overflow: hidden;
+}
+
+.icon {
+  width: 15px;
+  height: 15px;
+
+  flex-shrink: 0;
+
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-btn.tiny .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* =========================================================================
+   SHELL
+   ========================================================================= */
+
+.widget {
+  position: relative;
+
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100%;
+
+  padding: var(--pad);
+}
+
+.widget-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+
+  min-height: 0;
+}
+
+/* =========================================================================
+   MASTHEAD
+   The date is the subject: this board is about one day.
+   ========================================================================= */
+
+.app-header {
+  flex-shrink: 0;
+}
+
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  gap: 8px;
+}
+
+/* Kept non-interactive so a CTRL-drag over the header still moves the skin. */
+.masthead,
+.status-line {
+  pointer-events: none;
+
+  user-select: none;
+}
+
+.masthead {
+  min-width: 0;
+
+  font-family: var(--font-display);
+  font-size: var(--f-xl);
+  font-weight: 400;
+
+  line-height: 1.1;
+  letter-spacing: 0.2px;
+
+  color: var(--bone);
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+
+  gap: 8px;
+
+  margin-top: 5px;
+
+  font-size: var(--f-sm);
+  line-height: 1.3;
+
+  color: var(--dim);
+}
+
+.status-line .is-alarm {
+  color: var(--alarm);
+}
+
+.status-sep {
+  width: 1px;
+  height: 9px;
+
+  background: var(--line-strong);
+}
+
+.header-actions {
+  flex-shrink: 0;
+
+  display: flex;
+
+  margin-top: -3px;
+  margin-right: -4px;
+}
+
+/* Printed-agenda double rule. */
+.masthead-rule {
+  flex-shrink: 0;
+
+  height: 3px;
+
+  margin: 9px 0 10px;
+
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+}
+
+/* =========================================================================
+   FILTER TABS
+   ========================================================================= */
+
+.filters {
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-bottom: 10px;
+  padding-right: var(--scroll-rail);
+}
+
+.filter-btn {
+  position: relative;
+
+  display: inline-flex;
+  align-items: baseline;
+
+  gap: 5px;
+
+  padding: 2px 0 5px;
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  font-weight: 400;
+  letter-spacing: 0.3px;
+
+  color: var(--dim);
+
+  cursor: pointer;
+
+  user-select: none;
+
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.filter-btn:hover {
+  color: var(--bone);
+}
+
+.filter-btn.is-active {
+  color: var(--bone);
+}
+
+.filter-btn.is-active::after {
+  content: "";
+
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  height: 2px;
+
+  background: var(--bone);
+}
+
+.filter-count {
+  font-family: var(--font-text);
+  font-size: var(--f-xs);
+  font-variant-numeric: tabular-nums;
+
+  color: var(--faint);
+}
+
+.filter-btn.is-active .filter-count {
+  color: var(--dim);
+}
+
+.filter-count.is-zero {
+  opacity: 0.55;
+}
+
+/* =========================================================================
+   SEARCH
+   ========================================================================= */
+
+.search-row {
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+
+  gap: 6px;
+
+  margin-bottom: 9px;
+  padding-right: var(--scroll-rail);
+
+  border-bottom: 1px solid var(--edge);
+
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* A class-based display rule must not defeat the hidden attribute. */
+.search-row[hidden] {
+  display: none;
+}
+
+.search-row:focus-within {
+  border-bottom-color: var(--bone);
+  box-shadow: 0 1px 0 0 var(--bone);
+}
+
+.search-input {
+  flex: 1 1 auto;
+
+  min-width: 0;
+  height: 28px;
+
+  padding: 0 1px;
+
+  border: 0;
+
+  background: transparent;
+
+  font-size: var(--f-base);
+
+  color: var(--bone);
+}
+
+.search-input::placeholder {
+  color: var(--faint);
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* =========================================================================
+   THE BOARD
+   ========================================================================= */
+
+.task-area {
+  position: relative;
+
+  display: flex;
+  flex: 1 1 auto;
+
+  min-height: 0;
+}
+
+/* The spine. It sits above row washes and below the task nodes, so it stays
+   continuous no matter what the rows do. */
+.rail {
+  position: absolute;
+  left: var(--rail);
+  top: 3px;
+  bottom: 3px;
+
+  width: 1px;
+
+  background: var(--line);
+
+  transform-origin: 50% 0;
+
+  z-index: 2;
+}
+
+.task-scroll {
+  position: relative;
+
+  flex: 1 1 auto;
+
+  min-width: 0;
+  min-height: 0;
+
+  /* The board keeps its own scroll gutter, so rows never sit under the
+     scroll rail and the column never jumps when scrolling starts. */
+  scrollbar-gutter: stable;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  overscroll-behavior: contain;
+}
+
+.task-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.task-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.task-scroll::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(233, 228, 217, 0.14);
+}
+
+.task-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(233, 228, 217, 0.26);
+}
+
+.bucket-list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 15px;
+}
+
+.bucket {
+  display: flex;
+  flex-direction: column;
+}
+
+.bucket-heading {
+  position: relative;
+
+  display: flex;
+  align-items: baseline;
+
+  gap: 6px;
+
+  padding-left: var(--gutter);
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  font-weight: 400;
+  letter-spacing: 0.3px;
+
+  color: var(--bone);
+
+  user-select: none;
+}
+
+/* Tick where the bucket branches off the rail. */
+.bucket-heading::before {
+  content: "";
+
+  position: absolute;
+  left: var(--rail);
+  top: 0.6em;
+
+  width: 11px;
+  height: 1px;
+
+  background: var(--line-strong);
+}
+
+.bucket-count {
+  font-family: var(--font-text);
+  font-size: var(--f-xs);
+  font-variant-numeric: tabular-nums;
+
+  color: var(--faint);
+}
+
+.bucket.is-late .bucket-heading {
+  color: var(--alarm);
+}
+
+.bucket.is-late .bucket-heading::before {
+  background: var(--alarm);
+}
+
+.bucket.is-done .bucket-heading {
+  color: var(--dim);
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.empty-state {
+  padding: 22px 14px 22px var(--gutter);
+
+  font-size: var(--f-sm);
+  line-height: 1.55;
+
+  color: var(--dim);
+}
+
+.empty-state[hidden] {
+  display: none;
+}
+
+/* =========================================================================
+   TASK ROW
+   ========================================================================= */
+
+.task-item {
+  position: relative;
+
+  display: flex;
+  align-items: flex-start;
+
+  gap: 10px;
+
+  padding: var(--row-pad) 0 var(--row-pad) var(--gutter);
+
+  transition: background-color var(--dur) var(--ease);
+}
+
+/* Entry rule, inset so it never crosses the rail. */
+.task-item::after {
+  content: "";
+
+  position: absolute;
+  left: var(--gutter);
+  right: 0;
+  bottom: 0;
+
+  height: 1px;
+
+  background: var(--line);
+}
+
+.task-list > .task-item:last-child::after {
+  display: none;
+}
+
+.task-item:hover {
+  background: var(--wash);
+}
+
+.task-item.is-new {
+  animation: row-in var(--dur) var(--ease);
+}
+
+/* ------------------------- Completion node ------------------------ */
+
+.task-check {
+  position: absolute;
+  left: calc(var(--rail) - 7px);
+  top: var(--row-pad);
+
+  width: 15px;
+  height: 15px;
+
+  z-index: 3;
+
+  cursor: pointer;
+}
+
+.task-toggle {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  margin: 0;
+
+  opacity: 0;
+
+  cursor: pointer;
+}
+
+.checkmark {
+  position: absolute;
+  inset: 0;
+
+  display: grid;
+  place-items: center;
+
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+
+  background: var(--ink);
+
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.checkmark::after {
+  content: "";
+
+  width: 4px;
+  height: 8px;
+
+  margin-top: -2px;
+
+  border: solid var(--ink);
+  border-width: 0 2px 2px 0;
+
+  transform: rotate(45deg) scale(0.4);
+  opacity: 0;
+
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.task-item:hover .checkmark {
+  border-color: var(--bone);
+}
+
+.task-toggle:checked + .checkmark {
+  border-color: var(--bone);
+  background: var(--bone);
+}
+
+.task-toggle:checked + .checkmark::after {
+  opacity: 1;
+
+  transform: rotate(45deg) scale(1);
+}
+
+.task-toggle:focus-visible + .checkmark {
+  outline: 2px solid var(--bone);
+  outline-offset: 2px;
+}
+
+/* ------------------------------ Content --------------------------- */
+
+.task-content {
+  flex: 1 1 auto;
+
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 3px;
+}
+
+.task-heading {
+  display: flex;
+  align-items: baseline;
+
+  gap: 7px;
+
+  min-width: 0;
+}
+
+.task-title {
+  min-width: 0;
+
+  font-size: var(--f-base);
+  font-weight: 500;
+
+  line-height: 1.35;
+
+  color: var(--bone);
+
+  overflow-wrap: anywhere;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+
+  overflow: hidden;
+}
+
+.task-flag {
+  flex-shrink: 0;
+
+  font-family: var(--font-display);
+  font-size: var(--f-xs);
+  letter-spacing: 0.4px;
+
+  color: var(--bone);
+}
+
+.task-flag[hidden] {
+  display: none;
+}
+
+.task-when {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+
+  color: var(--dim);
+}
+
+.task-when.is-late {
+  color: var(--alarm);
+}
+
+.task-when.is-today {
+  color: var(--bone);
+}
+
+.task-when[hidden] {
+  display: none;
+}
+
+.task-desc {
+  font-size: var(--f-sm);
+  line-height: 1.45;
+
+  color: var(--dim);
+
+  overflow-wrap: anywhere;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+
+  overflow: hidden;
+}
+
+.task-desc[hidden] {
+  display: none;
+}
+
+/* Priority is carried by weight first, then by one explicit word. */
+.task-item.is-high .task-title {
+  font-weight: 600;
+}
+
+.task-item.is-low .task-title {
+  font-weight: 400;
+
+  color: var(--dim);
+}
+
+/* ------------------------------- Actions -------------------------- */
+
+.task-actions {
+  flex-shrink: 0;
+
+  display: flex;
+
+  opacity: 0.4;
+
+  transition: opacity var(--dur) var(--ease);
+}
+
+.task-item:hover .task-actions,
+.task-item:focus-within .task-actions {
+  opacity: 1;
+}
+
+.act-edit:hover,
+.act-duplicate:hover {
+  color: var(--bone);
+}
+
+.act-delete:hover {
+  color: var(--alarm);
+  background: var(--alarm-wash);
+}
+
+/* ---------------------------- Done state -------------------------- */
+
+.task-item.is-completed .task-title {
+  font-weight: 400;
+
+  color: var(--dim);
+
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+  text-decoration-thickness: 1px;
+}
+
+/* =========================================================================
+   ICON BUTTONS
+   ========================================================================= */
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+
+  width: 26px;
+  height: 26px;
+
+  border-radius: 2px;
+
+  color: var(--faint);
+
+  cursor: pointer;
+
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.icon-btn:hover {
+  background: var(--wash-strong);
+
+  color: var(--bone);
+}
+
+.icon-btn:active {
+  transform: translateY(1px);
+}
+
+.icon-btn.small {
+  width: 22px;
+  height: 22px;
+}
+
+.icon-btn.tiny {
+  width: 22px;
+  height: 22px;
+}
+
+/* =========================================================================
+   FOOTER — the one action that matters
+   ========================================================================= */
+
+.app-footer {
+  flex-shrink: 0;
+
+  margin-top: 10px;
+  padding-top: 10px;
+  padding-right: var(--scroll-rail);
+
+  border-top: 1px solid var(--line);
+}
+
+.add-bar {
+  display: flex;
+  align-items: center;
+
+  gap: 8px;
+
+  width: 100%;
+  height: 34px;
+
+  padding: 0 10px;
+
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+
+  background: transparent;
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  letter-spacing: 0.3px;
+
+  color: var(--bone);
+
+  cursor: pointer;
+
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.add-bar .icon {
+  stroke-width: 1.9;
+}
+
+.add-bar:hover {
+  border-color: var(--bone);
+  background: var(--bone);
+
+  color: var(--ink);
+}
+
+.add-bar:active {
+  transform: translateY(1px);
+}
+
+/* =========================================================================
+   OVERLAYS
+   ========================================================================= */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+
+  display: none;
+
+  background: var(--scrim);
+
+  z-index: 40;
+}
+
+.overlay:not([hidden]) {
+  display: flex;
+
+  animation: overlay-in var(--dur-fast) var(--ease);
+}
+
+/* The editor takes the whole board: on a canvas this small, editing is a
+   place you go, not a box you talk over. */
+.overlay.is-sheet {
+  align-items: stretch;
+
+  padding: 6px;
+}
+
+.overlay.is-center {
+  align-items: center;
+  justify-content: center;
+
+  padding: 26px;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+
+  background: var(--ink-raised);
+
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.5);
+
+  overflow: hidden;
+}
+
+.overlay.is-sheet .sheet {
+  height: 100%;
+}
+
+.sheet-small {
+  height: auto;
+}
+
+.sheet-header {
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 8px;
+
+  padding: 10px 8px 10px 12px;
+
+  border-bottom: 1px solid var(--line);
+}
+
+.sheet-title {
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  letter-spacing: 0.3px;
+
+  color: var(--bone);
+}
+
+.sheet-body {
+  flex: 1 1 auto;
+
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 15px;
+
+  padding: 14px 12px;
+
+  overflow-y: auto;
+}
+
+.sheet-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sheet-body::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(233, 228, 217, 0.14);
+}
+
+.sheet-text {
+  font-size: var(--f-sm);
+  line-height: 1.55;
+
+  color: var(--dim);
+
+  overflow-wrap: anywhere;
+}
+
+.sheet-actions {
+  flex-shrink: 0;
+
+  display: flex;
+
+  gap: 8px;
+
+  padding: 10px 12px;
+
+  border-top: 1px solid var(--line);
+}
+
+/* =========================================================================
+   FIELDS
+   ========================================================================= */
+
+.field {
+  display: flex;
+  flex-direction: column;
+
+  gap: 5px;
+
+  min-width: 0;
+}
+
+.field-label {
+  font-size: var(--f-sm);
+
+  color: var(--dim);
+}
+
+.field-row {
+  display: flex;
+
+  gap: 12px;
+}
+
+.field-row > .field {
+  flex: 1 1 0;
+}
+
+.field-row-tight {
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 8px;
+
+  margin-top: -9px;
+}
+
+.field-hint {
+  font-size: var(--f-xs);
+  line-height: 1.35;
+
+  color: var(--faint);
+}
+
+.field-error {
+  font-size: var(--f-xs);
+  line-height: 1.35;
+
+  color: var(--alarm);
+}
+
+.link-btn {
+  flex-shrink: 0;
+
+  padding: 2px 4px;
+
+  border-radius: 2px;
+
+  font-size: var(--f-xs);
+
+  color: var(--dim);
+
+  cursor: pointer;
+
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.link-btn:hover {
+  background: var(--wash-strong);
+
+  color: var(--bone);
+}
+
+.text-input {
+  width: 100%;
+  height: 30px;
+
+  padding: 0 1px;
+
+  border: 0;
+  border-bottom: 1px solid var(--edge);
+  border-radius: 0;
+
+  background: transparent;
+
+  font-size: var(--f-base);
+
+  color: var(--bone);
+
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.text-input::placeholder {
+  color: var(--faint);
+}
+
+.text-input:focus {
+  outline: none;
+
+  border-bottom-color: var(--bone);
+  box-shadow: 0 1px 0 0 var(--bone);
+}
+
+.text-input[aria-invalid="true"] {
+  border-bottom-color: var(--alarm);
+}
+
+.text-input::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+
+  cursor: pointer;
+}
+
+.text-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+textarea.text-input {
+  height: 62px;
+
+  padding: 5px 1px;
+
+  line-height: 1.45;
+
+  resize: none;
+}
+
+/* =========================================================================
+   SEGMENTED CHOICE (priority)
+   ========================================================================= */
+
+.segmented-field {
+  border: 0;
+}
+
+.segmented-field legend {
+  padding: 0 0 6px;
+}
+
+.segmented {
+  position: relative;
+
+  display: flex;
+
+  border-bottom: 1px solid var(--edge);
+}
+
+.segmented input {
+  position: absolute;
+
+  width: 1px;
+  height: 1px;
+
+  margin: 0;
+
+  opacity: 0;
+}
+
+.segmented label {
+  flex: 1 1 0;
+
+  display: grid;
+  place-items: center;
+
+  height: 27px;
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  letter-spacing: 0.3px;
+
+  color: var(--dim);
+
+  cursor: pointer;
+
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.segmented label:hover {
+  color: var(--bone);
+}
+
+.segmented input:checked + label {
+  color: var(--bone);
+
+  box-shadow: inset 0 -2px 0 0 var(--bone);
+}
+
+.segmented input:focus-visible + label {
+  outline: 2px solid var(--bone);
+  outline-offset: -2px;
+}
+
+/* =========================================================================
+   BUTTONS
+   ========================================================================= */
+
+.btn {
+  flex: 1 1 0;
+
+  height: 32px;
+
+  border: 1px solid transparent;
+  border-radius: 2px;
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  letter-spacing: 0.3px;
+
+  cursor: pointer;
+
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.btn-ghost {
+  border-color: var(--edge);
+
+  color: var(--dim);
+}
+
+.btn-ghost:hover {
+  border-color: var(--bone);
+
+  color: var(--bone);
+}
+
+.btn-primary {
+  border-color: var(--bone);
+
+  background: var(--bone);
+
+  color: var(--ink);
+}
+
+.btn-primary:hover {
+  border-color: #f6f2ea;
+
+  background: #f6f2ea;
+}
+
+.btn-danger {
+  border-color: var(--alarm);
+
+  background: var(--alarm);
+
+  font-weight: 600;
+
+  color: var(--ink);
+}
+
+.btn-danger:hover {
+  border-color: #ec6f65;
+
+  background: #ec6f65;
+}
+
+/* =========================================================================
+   TOASTS — the one loud moment, on purpose
+   ========================================================================= */
+
+.toast-region {
+  position: absolute;
+  left: var(--pad);
+  right: calc(var(--pad) + var(--scroll-rail));
+  bottom: 58px;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 6px;
+
+  pointer-events: none;
+
+  z-index: 60;
+}
+
+.toast-region:empty {
+  display: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 10px;
+
+  padding: 7px 10px;
+
+  border-radius: 2px;
+
+  background: var(--bone);
+
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+
+  font-size: var(--f-sm);
+
+  color: var(--ink);
+
+  pointer-events: auto;
+
+  animation: toast-in var(--dur) var(--ease);
+}
+
+.toast.is-leaving {
+  opacity: 0;
+
+  transform: translateY(4px);
+
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.toast-message {
+  min-width: 0;
+
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  flex-shrink: 0;
+
+  padding: 1px 3px;
+
+  font-family: var(--font-display);
+  font-size: var(--f-lg);
+  letter-spacing: 0.3px;
+
+  color: var(--ink);
+
+  text-decoration: underline;
+  text-underline-offset: 3px;
+
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: rgba(27, 25, 23, 0.12);
+}
+
+/* =========================================================================
+   MOTION
+   ========================================================================= */
+
+/* One orchestrated moment per load: the rail draws itself down. */
+.is-booting .rail {
+  animation: rail-draw 420ms var(--ease) both;
+}
+
+@keyframes rail-draw {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+
+    transform: none;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* =========================================================================
+   RESPONSIVE
+   The canvas is 300x480 by default, but Rainmeter can resize it.
+   ========================================================================= */
+
+@media (max-width: 268px) {
+  .widget {
+    --pad: 9px;
+    --rail: 12px;
+    --gutter: 27px;
+  }
+
+  .masthead {
+    font-size: 15px;
+  }
+
+  .status-line {
+    display: none;
+  }
+
+  .filters {
+    gap: 8px;
+  }
+}
+
+@media (min-width: 400px) {
+  .widget {
+    --pad: 16px;
+    --rail: 17px;
+    --gutter: 37px;
+  }
+
+  .masthead {
+    font-size: 19px;
+  }
+
+  .task-title {
+    font-size: 12.5px;
+  }
+
+  .search-input,
+  .text-input {
+    font-size: 12.5px;
+  }
+}
+
+@media (max-height: 430px) {
+  .widget {
+    --row-pad: 6px;
+  }
+
+  .bucket-list {
+    gap: 11px;
+  }
+
+  .task-desc {
+    display: none;
+  }
+
+  .masthead-rule {
+    margin: 7px 0 8px;
+  }
+}
+
+@media (max-height: 360px) {
+  .status-line {
+    display: none;
+  }
+
+  textarea.text-input {
+    height: 44px;
+  }
+
+  .sheet-body {
+    gap: 12px;
+  }
+}
